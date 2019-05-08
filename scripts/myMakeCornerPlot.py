@@ -1,0 +1,106 @@
+import numpy as np
+from chainconsumer import ChainConsumer
+from astropy.table import Table
+from astropy.io import fits
+import matplotlib.pyplot as plt
+import argparse
+
+#gw_des = np.loadtxt('HY_joint_HLVDtest3.txt', unpack=True).T
+#des= np.loadtxt('chains/2pt_sim_1110_baseline_Y3cov.fits_chain_d_w.txt', unpack=True).T
+
+#nstop=len(gw_des)
+#nbegin=int(round(nstop/2.))
+#burned_gw_des=gw_des[nbegin:] #burn the first half of the chain
+
+#omega_m, h0, w, S8, log_weight, old_weight = gw_des[:,0], gw_des[:,1], gw_des[:,6], gw_des[:,27],gw_des[:,30] , gw_des[:,28]
+#burned_gw_des[:,0], burned_gw_des[:,1], burned_gw_des[:,6], burned_gw_des[:,27], burned_gw_des[:,30] , burned_gw_des[:,28]
+#Y3_omega_m, Y3_h0, Y3_w, Y3_S8, Y3_weight = des[:,0], des[:,1], des[:,6], des[:,27], des[:,29]
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--jointchain', type=str, help="output from your gw+des cosmosis run, assumes naming scheme like name_run.txt, ex: joint_Updated_Mock_O3.txt, MyRuns_AligoDesign.txt")
+parser.add_argument('--deschain', type=str, choices=['Y1','Y3'], help="DES forcast data Y1 or Y3")
+parser.add_argument('--events', help="how many mock events you had - used only for naming purposes")
+args=parser.parse_args()
+
+if args.events is None:
+    numevents = " "
+else:
+    numevents = args.events
+
+fname = (args.jointchain).rsplit('_',1)[-1] #ex: Updated_mock_O3.txt --> O3.txt
+runname = fname.rsplit('.',1)[0] # --> O3
+if runname == "O3" or runname == "AligoDesign" or runname == "AplusDesign":
+    run = runname
+else:
+    run = args.jointchain
+
+#read in data and convert to table for convenience
+test_gw = Table.read(args.jointchain, format='ascii')
+if args.deschain == 'Y1':
+    des= Table.read('chains/2pt_NG.fits_d_w_chain.txt', format='ascii')
+if args.deschain == 'Y3':
+    des= Table.read('chains/2pt_sim_1110_baseline_Y3cov.fits_chain_d_w.txt', format='ascii')
+
+#burn des -- we want to burn (length of chain)-(nsample)
+get_nsample=des.meta['comments'] #get all the commented lines
+print(get_nsample[-3]) #make sure this prints nsample= #
+for line in get_nsample:
+    comment = line.split("=")
+    if comment[0]=="nsample":
+        nsample=comment[-1]
+        print('nsample=',nsample)
+
+burn=(len(des))-(int(nsample))
+test_des=des[burn:]
+
+#burn gw+des -- literally just burn the first half
+#burn_gw=int(round(len(gw)/2.))
+#test_gw=gw[burn_gw:]
+
+
+#define parameters for gw+des data
+omega_m =np.array(test_gw['cosmological_parameters--omega_m'])
+h0 = np.array(test_gw['cosmological_parameters--h0'])
+w = np.array(test_gw['cosmological_parameters--w'])
+old_weight = np.array(test_gw['old_weight'])
+log_weight = np.array(test_gw['log_weight'])
+sigma_8 = np.array(test_gw['cosmological_parameters--sigma_8'])
+s_8=(omega_m/0.3)**.5*sigma_8
+
+#define parameters for des forcast data
+des_omega_m =np.array(test_des['cosmological_parameters--omega_m'])
+des_h0 = np.array(test_des['cosmological_parameters--h0'])
+des_w = np.array(test_des['cosmological_parameters--w'])
+des_weight = np.array(test_des['weight'])
+des_sigma_8 = np.array(test_des['COSMOLOGICAL_PARAMETERS--SIGMA_8'])
+des_s_8=(des_omega_m/0.3)**.5*des_sigma_8
+
+#compute the new weight for joint data
+joint_weight = np.array(old_weight)*np.array(np.exp(log_weight))
+joint_weight/= joint_weight.sum()
+#print(joint_weight[-10:])
+
+#plt.hist(np.log(joint_weight),50, range=[)
+#plt.xlim(0e-43,0.5e-43)
+#plt.show()
+#exit()
+
+c = ChainConsumer()
+c.add_chain([omega_m, h0, w, sigma_8], parameters=["$\Omega_m$", "$h$", "$w$", "$S_8$"], name="DES "+str(args.deschain)+" + \n LVC O3 ("+str(numevents)+" bright sirens)", weights=joint_weight)
+
+c.add_chain([des_omega_m, des_h0, des_w, des_sigma_8], name='DES '+str(args.deschain), weights=des_weight)
+
+c.configure(sigma2d=False,shade_alpha=[0.5, 0.5,.1,1.], kde=[1.5, 1.5], smooth=False, shade=['t','t','t','t'],colors=["b", "r","k","g"], linewidths=1.2, shade_gradient=1.0,legend_kwargs={"labelspacing": 0.1,"fontsize":30},diagonal_tick_labels=False,label_font_size=25, max_ticks=5)
+
+#fig = c.plotter.plot(display=True, figsize="column")
+fig = c.plotter.plot(figsize=1.7,extents=[[.19,.45],[.55,.90],[-1.8,-.4],[0.7,.9]])
+
+newfile=(args.jointchain).rsplit('.',1)[0]
+filename='./test_1-16-19_comove_O3.png'
+#ax = fig.get_axes()
+#ax.yaxis.label.set_size(40)
+#ax[8].set_yticks([-1.6, -1.3, -1, -0.7, -0.4])
+#ax[14].set_xticks([-1.6, -1.3, -1, -0.7, -0.4])
+#plt.show()
+fig.savefig(filename, dpi=300, transparent=True, pad_inches=0.05)
+
